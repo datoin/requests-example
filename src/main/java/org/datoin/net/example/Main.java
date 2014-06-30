@@ -7,6 +7,8 @@ import org.datoin.net.http.Response;
 import org.datoin.net.http.methods.Methods;
 
 import java.io.File;
+import java.io.FileNotFoundException;
+import java.io.FileWriter;
 import java.util.Arrays;
 
 /**
@@ -21,20 +23,10 @@ public class Main {
     public static final int MAX_ARGS = 20;
     private static final String CONTENT = "content";
     private static final String HEADERS = "headers";
+    private static final String OUT_FILE = "outfile";
 
     public static void main(String[] args) throws Exception {
-        Request request = parseRequest(args);
-        Response resp = request.execute();
-        int status = resp.getStatus();
-        if( status >= 200 && status < 400){ // allow ok and redirects
-            String responseString = resp.getContentAsString();
-            if(responseString != null) {
-                System.out.println(responseString);
-            }
-        }
-    }
-
-    public static Request parseRequest(String[] args) throws Exception {
+        int status = -1;
         Options options = new Options();
         //options.addOption("o", "output",  false, "output path");
         options.addOption(OptionBuilder
@@ -60,7 +52,7 @@ public class Main {
         options.addOption(OptionBuilder
                 .withLongOpt(FILES)
                 .hasArgs(MAX_ARGS)
-                .withDescription("optional multipart file uploads , file1 file2 ...")
+                .withDescription("optional multipart file uploads , name=filePath1 name=filePath2 ...")
                 .withArgName(FILES.toUpperCase())
                 .create(FILES.substring(0, 1)));
         options.addOption(OptionBuilder
@@ -76,6 +68,13 @@ public class Main {
                         .withDescription("optional headers to be set as header1=value1 header2=value2 ...")
                         .withArgName(HEADERS.toUpperCase())
                         .create(HEADERS.substring(0, 1))
+        );
+        options.addOption(OptionBuilder
+                        .withLongOpt(OUT_FILE)
+                        .hasArg()
+                        .withDescription("optional headers to be set as header1=value1 header2=value2 ...")
+                        .withArgName(OUT_FILE.toUpperCase())
+                        .create(OUT_FILE.substring(0, 1))
         );
         HelpFormatter formatter = new HelpFormatter();
 
@@ -96,34 +95,29 @@ public class Main {
                 String url = cmd.getOptionValue(URL);
                 String files[]  = cmd.getOptionValues(FILES);
                 String headers[] = cmd.getOptionValues(HEADERS);
-                Request request = getRequest(method, url);
+                String outFile = cmd.getOptionValue(OUT_FILE, null);
+
                 sb.append(METHOD).append(" = ").append(method).append("\n")
                         .append(URL).append(" = ").append(url).append("\n")
                         .append(CONTENT).append(" = ").append(contentFile).append("\n");
 
-                if(params != null) {
-                    sb.append(PARAMS).append(" = ").append(Arrays.asList(params)).append("\n");
-                    for(String param : params){
-                        String[] split = param.split("=");
-                        request.setParam(split[0], split[1]);
-                    }
-                }
-                if(files != null) {
-                    sb.append(FILES).append(" = ").append(Arrays.asList(files)).append("\n");
-                    for(String file : files ){
-                        request.addInputStream(file, new File(file));
-                    }
-                }
-
-                if(headers != null) {
-                    sb.append(HEADERS).append(" = ").append(Arrays.asList(headers));
-                    for(String header : headers){
-                        String[] split = header.split("=");
-                        request.setHeader(split[0], split[1]);
-                    }
-                }
+                Request request = getRequest(sb, method, params, url, files, headers);
                 System.out.println("Prepared request using : \n" + sb.toString());
-                return request;
+                Response resp = request.execute();
+                status = resp.getStatus();
+                if( status >= 200 && status < 500){ // allow ok , redirects and client errors
+                    String responseString = resp.getContentAsString();
+                    if(responseString != null) {
+                        if(outFile != null){
+                            FileWriter fileWriter = new FileWriter(outFile);
+                            fileWriter.write(responseString);
+                            fileWriter.close();
+
+                        } else {
+                            System.out.println(responseString);
+                        }
+                    }
+                }
 
             } catch (Exception e) {
                 System.out.println("Arguments mismatched: " + e);
@@ -131,7 +125,36 @@ public class Main {
                 throw e;
             }
         }
-        return null;
+        // 200 is normal 0 status
+        System.exit((status - 200));
+    }
+
+
+    private static Request getRequest(StringBuilder sb, String method, String[] params, String url, String[] files, String[] headers) throws FileNotFoundException {
+        Request request = getRequest(method, url);
+        if(params != null) {
+            sb.append(PARAMS).append(" = ").append(Arrays.asList(params)).append("\n");
+            for(String param : params){
+                String[] split = param.split("=");
+                request.setParam(split[0], split[1]);
+            }
+        }
+        if(files != null) {
+            sb.append(FILES).append(" = ").append(Arrays.asList(files)).append("\n");
+            for(String file : files ){
+                String[] split = file.split("=");
+                request.addInputStream(split[0], new File(split[1]));
+            }
+        }
+
+        if(headers != null) {
+            sb.append(HEADERS).append(" = ").append(Arrays.asList(headers));
+            for(String header : headers){
+                String[] split = header.split("=");
+                request.setHeader(split[0], split[1]);
+            }
+        }
+        return request;
     }
 
     private static Request getRequest(String method, String url){
